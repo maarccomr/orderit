@@ -1,0 +1,696 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>La Buena Mesa - TPV / Caja</title>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Socket.IO -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.5/socket.io.min.js"></script>
+    <!-- Iconos (Lucide) -->
+    <script src="https://unpkg.com/lucide@latest"></script>
+    
+    <style>
+        /* Estilos personalizados para la barra de desplazamiento */
+        ::-webkit-scrollbar {
+            width: 8px;
+            height: 8px;
+        }
+        ::-webkit-scrollbar-track {
+            background: #f1f1f1;
+            border-radius: 4px;
+        }
+        ::-webkit-scrollbar-thumb {
+            background: #c1c1c1;
+            border-radius: 4px;
+        }
+        ::-webkit-scrollbar-thumb:hover {
+            background: #a8a8a8;
+        }
+        
+        .mesa-seleccionada {
+            box-shadow: 0 0 0 4px rgba(59, 130, 246, 0.5); /* Anillo azul */
+            transform: scale(1.02);
+        }
+    </style>
+</head>
+<body class="bg-gray-100 min-h-screen flex flex-col font-sans text-gray-800">
+
+    <!-- Cabecera -->
+    <header class="bg-white shadow-sm px-6 py-4 flex justify-between items-center z-10 shrink-0">
+        <div class="flex items-center gap-6">
+            <div class="flex items-center gap-3">
+                <i data-lucide="store" class="w-7 h-7 text-blue-600"></i>
+                <div>
+                    <h1 class="text-xl font-bold text-gray-800 leading-tight">La Buena Mesa <span class="text-gray-400 font-light">| TPV / Caja</span></h1>
+                    <p class="text-xs text-gray-500">Cobros, facturación y gestión de mesas</p>
+                </div>
+            </div>
+
+            <!-- Accesos a los demás paneles -->
+            <nav class="hidden lg:flex items-center gap-1 bg-gray-100 p-1 rounded-xl text-xs font-medium text-gray-600">
+                <a href="/pedidos" class="px-2.5 py-1 rounded-lg hover:text-gray-900 hover:bg-white transition-all flex items-center gap-1 text-indigo-700">
+                    <i data-lucide="smartphone" class="w-3.5 h-3.5"></i> Comandas
+                </a>
+                <a href="/cocina" class="px-2.5 py-1 rounded-lg hover:text-gray-900 hover:bg-white transition-all flex items-center gap-1 text-orange-600">
+                    <i data-lucide="flame" class="w-3.5 h-3.5"></i> Cocina KDS
+                </a>
+                <a href="/gestion" class="px-2.5 py-1 rounded-lg hover:text-gray-900 hover:bg-white transition-all flex items-center gap-1 text-purple-700">
+                    <i data-lucide="settings" class="w-3.5 h-3.5"></i> Panel Gestión
+                </a>
+            </nav>
+        </div>
+        
+        <div class="flex items-center gap-6">
+            <!-- Reloj -->
+            <div id="reloj" class="text-xl font-bold font-mono text-gray-700">
+                00:00:00
+            </div>
+            <!-- Estado de conexión -->
+            <div class="flex items-center gap-2 px-3 py-1 bg-gray-50 rounded-full border">
+                <div id="indicador-conexion" class="w-2.5 h-2.5 rounded-full bg-red-500"></div>
+                <span id="texto-conexion" class="text-xs font-semibold text-gray-600">Desconectado</span>
+            </div>
+        </div>
+    </header>
+
+    <!-- Contenido Principal -->
+    <main class="flex-1 flex overflow-hidden p-4 gap-4">
+        
+        <!-- Panel Izquierdo: Mapa/Lista de Mesas (w-1/3) -->
+        <section class="w-1/3 bg-white rounded-xl shadow-sm border border-gray-200 flex flex-col overflow-hidden shrink-0">
+            <div class="p-4 border-b border-gray-100 bg-gray-50 flex justify-between items-center shrink-0">
+                <h2 class="text-lg font-semibold flex items-center gap-2">
+                    <i data-lucide="layout-grid" class="w-5 h-5 text-gray-500"></i>
+                    Mesas
+                </h2>
+                <button onclick="TPV.cargarMesas()" class="p-2 text-gray-500 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors" title="Actualizar">
+                    <i data-lucide="refresh-cw" class="w-4 h-4"></i>
+                </button>
+            </div>
+            <div id="contenedor-mesas" class="flex-1 overflow-y-auto p-4 grid grid-cols-2 gap-4 content-start">
+                <!-- Las mesas se renderizarán aquí -->
+                <div class="col-span-2 text-center text-gray-400 py-8 flex flex-col items-center">
+                    <i data-lucide="loader-2" class="w-8 h-8 animate-spin mb-2"></i>
+                    Cargando mesas...
+                </div>
+            </div>
+        </section>
+
+        <!-- Panel Derecho: Detalle de Pedido y Pago (w-2/3) -->
+        <section class="w-2/3 bg-white rounded-xl shadow-sm border border-gray-200 flex flex-col overflow-hidden shrink-0 relative">
+            <!-- Capa de error/notificación -->
+            <div id="notificacion-toast" class="absolute top-4 left-1/2 transform -translate-x-1/2 px-4 py-2 rounded-lg shadow-lg text-white font-medium text-sm transition-opacity duration-300 opacity-0 pointer-events-none z-50">
+            </div>
+
+            <!-- Estado Vacío -->
+            <div id="estado-vacio-pedido" class="flex-1 flex flex-col items-center justify-center text-gray-400">
+                <i data-lucide="receipt" class="w-20 h-20 text-gray-200 mb-4"></i>
+                <p class="text-lg font-medium">Selecciona una mesa para ver su cuenta</p>
+            </div>
+
+            <!-- Contenido del Pedido (Oculto por defecto) -->
+            <div id="contenido-pedido" class="hidden flex-1 flex flex-col h-full">
+                <!-- Cabecera del pedido -->
+                <div class="p-6 border-b border-gray-100 bg-gray-50 flex justify-between items-center shrink-0">
+                    <div>
+                        <h2 id="titulo-mesa" class="text-2xl font-bold text-gray-800">Mesa --</h2>
+                        <p id="titulo-ticket" class="text-sm text-gray-500 font-mono mt-1">Ticket: ----</p>
+                    </div>
+                    <button onclick="TPV.imprimirCuenta()" class="flex items-center gap-2 px-4 py-2 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50 transition-colors bg-white font-medium">
+                        <i data-lucide="printer" class="w-4 h-4"></i>
+                        Imprimir Cuenta
+                    </button>
+                </div>
+
+                <!-- Tabla de ítems -->
+                <div class="flex-1 overflow-y-auto p-6">
+                    <table class="w-full text-left border-collapse">
+                        <thead>
+                            <tr class="border-b-2 border-gray-200 text-gray-500 text-sm">
+                                <th class="pb-3 w-16 text-center">Cant.</th>
+                                <th class="pb-3">Ítem</th>
+                                <th class="pb-3 text-right">P/U</th>
+                                <th class="pb-3 text-center">Estado</th>
+                                <th class="pb-3 text-right">Total</th>
+                            </tr>
+                        </thead>
+                        <tbody id="tabla-items-pedido" class="text-gray-700">
+                            <!-- Los ítems se inyectan aquí -->
+                        </tbody>
+                    </table>
+                </div>
+
+                <!-- Zona de Totales y Pago -->
+                <div class="border-t border-gray-200 bg-gray-50 p-6 shrink-0 flex flex-col gap-4">
+                    
+                    <div class="flex justify-between items-end gap-8">
+                        <!-- Descuentos y Método de Pago -->
+                        <div class="flex-1 flex flex-col gap-4">
+                            <!-- Selector de Método de Pago -->
+                            <div>
+                                <label class="block text-sm font-medium text-gray-700 mb-2">Método de Pago</label>
+                                <div class="flex p-1 bg-gray-200 rounded-lg gap-1" id="selector-metodo-pago">
+                                    <button class="metodo-btn flex-1 py-2 px-4 rounded-md text-sm font-medium transition-colors bg-white shadow-sm text-gray-900" data-metodo="efectivo">
+                                        <i data-lucide="banknote" class="w-4 h-4 inline-block mr-1"></i> Efectivo
+                                    </button>
+                                    <button class="metodo-btn flex-1 py-2 px-4 rounded-md text-sm font-medium transition-colors text-gray-600 hover:text-gray-900" data-metodo="tarjeta">
+                                        <i data-lucide="credit-card" class="w-4 h-4 inline-block mr-1"></i> Tarjeta
+                                    </button>
+                                    <button class="metodo-btn flex-1 py-2 px-4 rounded-md text-sm font-medium transition-colors text-gray-600 hover:text-gray-900" data-metodo="mixto">
+                                        <i data-lucide="wallet" class="w-4 h-4 inline-block mr-1"></i> Mixto
+                                    </button>
+                                </div>
+                            </div>
+
+                            <!-- Descuento -->
+                            <div>
+                                <label class="block text-sm font-medium text-gray-700 mb-2">Descuento (%)</label>
+                                <div class="flex gap-2">
+                                    <input type="number" id="input-descuento" min="0" max="100" value="0" class="w-24 px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none">
+                                    <button onclick="TPV.aplicarDescuento()" class="px-4 py-2 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300 transition-colors text-sm font-medium">
+                                        Aplicar
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Totales -->
+                        <div class="w-64 flex flex-col gap-2">
+                            <div class="flex justify-between text-gray-600">
+                                <span>Subtotal:</span>
+                                <span id="resumen-subtotal">$0.00</span>
+                            </div>
+                            <div class="flex justify-between text-red-500 font-medium hidden" id="fila-descuento">
+                                <span>Descuento (<span id="texto-porcentaje">0</span>%):</span>
+                                <span id="resumen-descuento">-$0.00</span>
+                            </div>
+                            <div class="border-t border-gray-300 my-1"></div>
+                            <div class="flex justify-between items-center">
+                                <span class="text-xl font-bold text-gray-800">Total:</span>
+                                <span id="resumen-total" class="text-3xl font-bold text-gray-900">$0.00</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Botón de Cobro -->
+                    <button onclick="TPV.procesarPago()" class="w-full py-4 mt-2 bg-green-600 hover:bg-green-700 text-white text-xl font-bold rounded-xl shadow-md transition-colors flex items-center justify-center gap-2">
+                        <i data-lucide="check-circle" class="w-6 h-6"></i>
+                        Cobrar y Cerrar Mesa
+                    </button>
+                </div>
+            </div>
+        </section>
+    </main>
+
+    <!-- Panel Inferior: Historial de Pagos Recientes -->
+    <footer class="h-36 bg-white rounded-xl shadow-sm border border-gray-200 mx-4 mb-4 p-4 shrink-0 flex flex-col">
+        <h3 class="text-sm font-semibold text-gray-500 mb-3 flex items-center gap-2 uppercase tracking-wider">
+            <i data-lucide="history" class="w-4 h-4"></i>
+            Pagos Recientes
+        </h3>
+        <div id="contenedor-pagos" class="flex-1 flex gap-4 overflow-x-auto pb-2 items-center">
+            <!-- Mensaje vacío si no hay pagos -->
+            <div class="text-sm text-gray-400 italic">No hay cobros recientes en esta sesión.</div>
+        </div>
+    </footer>
+
+    <!-- Lógica de la aplicación -->
+    <script>
+        // Formateador de moneda en Euros (€)
+        const formatoMoneda = new Intl.NumberFormat('es-ES', {
+            style: 'currency',
+            currency: 'EUR'
+        });
+
+        // Módulo principal del TPV
+        const TPV = {
+            socket: null,
+            mesas: [],
+            mesaSeleccionada: null,
+            pedidoActual: null,
+            pagosRecientes: [],
+            metodoPagoSeleccionado: 'efectivo',
+            descuentoAplicado: 0,
+            
+            // Inicialización de la aplicación
+            init() {
+                this.iniciarReloj();
+                this.configurarEventosUI();
+                this.conectar();
+                this.cargarMesas();
+                
+                // Inicializar iconos
+                lucide.createIcons();
+            },
+
+            // Manejo del reloj de la cabecera
+            iniciarReloj() {
+                const elementoReloj = document.getElementById('reloj');
+                setInterval(() => {
+                    const ahora = new Date();
+                    elementoReloj.textContent = ahora.toLocaleTimeString('es-ES', { 
+                        hour: '2-digit', minute: '2-digit', second: '2-digit' 
+                    });
+                }, 1000);
+            },
+
+            // Configurar listeners de la interfaz
+            configurarEventosUI() {
+                // Configurar selector de métodos de pago
+                const botones = document.querySelectorAll('.metodo-btn');
+                botones.forEach(btn => {
+                    btn.addEventListener('click', (e) => {
+                        // Resetear estilos
+                        botones.forEach(b => {
+                            b.classList.remove('bg-white', 'shadow-sm', 'text-gray-900');
+                            b.classList.add('text-gray-600');
+                        });
+                        // Aplicar estilo al seleccionado
+                        const botonSeleccionado = e.currentTarget;
+                        botonSeleccionado.classList.remove('text-gray-600');
+                        botonSeleccionado.classList.add('bg-white', 'shadow-sm', 'text-gray-900');
+                        
+                        this.metodoPagoSeleccionado = botonSeleccionado.dataset.metodo;
+                    });
+                });
+            },
+
+            // Conexión WebSockets
+            conectar() {
+                try {
+                    // Inicializar Socket.io (intentando conectar al mismo host)
+                    this.socket = io({
+                        reconnectionDelayMax: 10000,
+                    });
+
+                    const indConexion = document.getElementById('indicador-conexion');
+                    const txtConexion = document.getElementById('texto-conexion');
+
+                    this.socket.on('connect', () => {
+                        indConexion.className = 'w-3 h-3 rounded-full bg-green-500';
+                        txtConexion.textContent = 'Conectado';
+                    });
+
+                    this.socket.on('disconnect', () => {
+                        indConexion.className = 'w-3 h-3 rounded-full bg-red-500';
+                        txtConexion.textContent = 'Desconectado';
+                    });
+
+                    // Eventos del negocio
+                    this.socket.on('pedido_creado', (data) => {
+                        this.mostrarNotificacion(`Nuevo pedido en Mesa ${data.mesa_numero}`, 'info');
+                        this.cargarMesas(); // Recargar el estado de las mesas
+                    });
+
+                    this.socket.on('estado_pedido_actualizado', (data) => {
+                        // Si tenemos el pedido abierto, lo recargamos
+                        if (this.pedidoActual && this.pedidoActual.id === data.pedido_id) {
+                            this.cargarPedidoMesa(this.mesaSeleccionada.id);
+                        }
+                    });
+
+                    this.socket.on('pedido_pagado', (data) => {
+                        this.mostrarNotificacion(`Pedido ${data.ticket} cobrado con éxito`, 'success');
+                        this.cargarMesas();
+                        
+                        // Si teníamos seleccionada la mesa que acaba de pagarse, limpiar el panel
+                        if (this.mesaSeleccionada && this.mesaSeleccionada.id === data.mesa_id) {
+                            this.limpiarPanelDerecho();
+                        }
+                    });
+
+                } catch (error) {
+                    console.error("Error al inicializar sockets:", error);
+                }
+            },
+
+            // Obtener mesas vía REST
+            async cargarMesas() {
+                try {
+                    // Mock de la respuesta para desarrollo visual si falla el fetch
+                    const respuesta = await fetch('/api/mesas').catch(() => null);
+                    
+                    if (respuesta && respuesta.ok) {
+                        this.mesas = await respuesta.json();
+                    } else {
+                        // Mock data para asegurar que el MVP es visible sin backend completo
+                        this.mesas = [
+                            { id: 1, numero: 1, capacidad: 4, estado: 'ocupada', ticket: 'T0042', hora_apertura: '14:30' },
+                            { id: 2, numero: 2, capacidad: 2, estado: 'libre' },
+                            { id: 3, numero: 3, capacidad: 4, estado: 'reservada' },
+                            { id: 4, numero: 4, capacidad: 6, estado: 'ocupada', ticket: 'T0043', hora_apertura: '15:10' },
+                            { id: 5, numero: 5, capacidad: 2, estado: 'libre' },
+                            { id: 6, numero: 6, capacidad: 8, estado: 'ocupada', ticket: 'T0045', hora_apertura: '15:45' },
+                        ];
+                    }
+                    this.renderizarMesas();
+                } catch (error) {
+                    this.mostrarNotificacion("Error al cargar mesas", 'error');
+                    console.error(error);
+                }
+            },
+
+            // Pintar las tarjetas de las mesas
+            renderizarMesas() {
+                const contenedor = document.getElementById('contenedor-mesas');
+                contenedor.innerHTML = '';
+
+                this.mesas.forEach(mesa => {
+                    // Determinar estilos según estado
+                    let clasesBase = "relative flex flex-col p-4 rounded-xl border-2 cursor-pointer transition-all hover:-translate-y-1";
+                    let colorBadge, textoBadge;
+                    
+                    switch(mesa.estado) {
+                        case 'libre':
+                            clasesBase += " border-green-200 bg-green-50 text-green-900";
+                            colorBadge = "bg-green-500";
+                            textoBadge = "Libre";
+                            break;
+                        case 'ocupada':
+                            clasesBase += " border-orange-300 bg-orange-50 text-orange-900";
+                            colorBadge = "bg-orange-500";
+                            textoBadge = "Ocupada";
+                            break;
+                        case 'reservada':
+                            clasesBase += " border-blue-200 bg-blue-50 text-blue-900";
+                            colorBadge = "bg-blue-500";
+                            textoBadge = "Reservada";
+                            break;
+                    }
+
+                    // Destacar si está seleccionada
+                    if (this.mesaSeleccionada && this.mesaSeleccionada.id === mesa.id) {
+                        clasesBase += " mesa-seleccionada";
+                    }
+
+                    const tarjeta = document.createElement('div');
+                    tarjeta.className = clasesBase;
+                    tarjeta.onclick = () => this.seleccionarMesa(mesa.id);
+                    
+                    // HTML Interno de la tarjeta
+                    tarjeta.innerHTML = `
+                        <div class="flex justify-between items-start mb-2">
+                            <h3 class="text-2xl font-bold">Mesa ${mesa.numero}</h3>
+                            <div class="px-2 py-1 rounded text-xs font-bold text-white ${colorBadge}">${textoBadge}</div>
+                        </div>
+                        <div class="flex items-center gap-1 text-sm opacity-75 mb-auto">
+                            <i data-lucide="users" class="w-4 h-4"></i>
+                            <span>Capacidad: ${mesa.capacidad}</span>
+                        </div>
+                        ${mesa.estado === 'ocupada' ? `
+                        <div class="mt-4 pt-3 border-t border-black/10 flex justify-between items-center text-sm font-medium">
+                            <span class="flex items-center gap-1"><i data-lucide="receipt" class="w-4 h-4"></i> ${mesa.ticket}</span>
+                            <span class="flex items-center gap-1"><i data-lucide="clock" class="w-4 h-4"></i> ${mesa.hora_apertura}</span>
+                        </div>
+                        ` : ''}
+                    `;
+                    
+                    contenedor.appendChild(tarjeta);
+                });
+                
+                lucide.createIcons(); // Re-renderizar iconos en el contenido dinámico
+            },
+
+            // Lógica al clickear una mesa
+            seleccionarMesa(mesaId) {
+                const mesa = this.mesas.find(m => m.id === mesaId);
+                if (!mesa) return;
+
+                this.mesaSeleccionada = mesa;
+                this.renderizarMesas(); // Actualizar UI (borde azul)
+
+                if (mesa.estado === 'ocupada') {
+                    this.cargarPedidoMesa(mesa.id);
+                } else {
+                    this.limpiarPanelDerecho();
+                }
+            },
+
+            // Limpiar la vista derecha
+            limpiarPanelDerecho() {
+                this.pedidoActual = null;
+                document.getElementById('estado-vacio-pedido').classList.remove('hidden');
+                document.getElementById('contenido-pedido').classList.add('hidden');
+            },
+
+            // Obtener el pedido de una mesa
+            async cargarPedidoMesa(mesaId) {
+                try {
+                    // Mostrar panel, estado de carga opcional aquí
+                    document.getElementById('estado-vacio-pedido').classList.add('hidden');
+                    document.getElementById('contenido-pedido').classList.remove('hidden');
+                    
+                    const respuesta = await fetch(`/api/pedidos?mesa_id=${mesaId}&estado=activo`).catch(() => null);
+                    
+                    if (respuesta && respuesta.ok) {
+                        const datos = await respuesta.json();
+                        this.pedidoActual = datos.length > 0 ? datos[0] : null;
+                    } else {
+                        // Mock de pedido para MVP
+                        this.pedidoActual = {
+                            id: 101,
+                            ticket: this.mesaSeleccionada.ticket,
+                            mesa_numero: this.mesaSeleccionada.numero,
+                            items: [
+                                { id: 1, cantidad: 2, nombre: 'Hamburguesa Clásica', precio_unitario: 120, estado: 'listo' },
+                                { id: 2, cantidad: 1, nombre: 'Papas a la Francesa', precio_unitario: 50, estado: 'listo' },
+                                { id: 3, cantidad: 2, nombre: 'Refresco Cola', precio_unitario: 35, estado: 'entregado' }
+                            ]
+                        };
+                    }
+
+                    // Resetear descuento al cargar nuevo pedido
+                    this.descuentoAplicado = 0;
+                    document.getElementById('input-descuento').value = 0;
+
+                    this.renderizarDetallePedido();
+                } catch (error) {
+                    this.mostrarNotificacion("Error al cargar la cuenta", 'error');
+                    console.error(error);
+                }
+            },
+
+            // Renderizar los detalles del pedido en el panel derecho
+            renderizarDetallePedido() {
+                if (!this.pedidoActual) {
+                    this.limpiarPanelDerecho();
+                    return;
+                }
+
+                // Actualizar cabecera
+                document.getElementById('titulo-mesa').textContent = `Mesa ${this.pedidoActual.mesa_numero || this.mesaSeleccionada.numero}`;
+                document.getElementById('titulo-ticket').textContent = `Ticket: ${this.pedidoActual.numero_ticket || this.pedidoActual.ticket || 'T-????'}`;
+
+                // Construir tabla de ítems
+                const tbody = document.getElementById('tabla-items-pedido');
+                tbody.innerHTML = '';
+                
+                let subtotal = 0;
+
+                (this.pedidoActual.items || []).forEach(item => {
+                    const precioUnit = parseFloat(item.precio_unitario || item.precio || 0);
+                    const cantidad = parseInt(item.cantidad || 1);
+                    const totalItem = cantidad * precioUnit;
+                    subtotal += totalItem;
+
+                    // Determinar badge de estado
+                    let estiloEstado = "bg-gray-100 text-gray-700";
+                    switch(item.estado) {
+                        case 'pendiente': estiloEstado = "bg-red-50 text-red-600 border border-red-200"; break;
+                        case 'preparando': estiloEstado = "bg-yellow-50 text-yellow-600 border border-yellow-200"; break;
+                        case 'listo': estiloEstado = "bg-green-50 text-green-600 border border-green-200"; break;
+                        case 'entregado': 
+                        case 'servido': estiloEstado = "bg-blue-50 text-blue-600 border border-blue-200"; break;
+                    }
+
+                    const tr = document.createElement('tr');
+                    tr.className = "border-b border-gray-100 hover:bg-gray-50 transition-colors";
+                    tr.innerHTML = `
+                        <td class="py-4 text-center font-medium">${cantidad}</td>
+                        <td class="py-4 font-medium text-gray-900">${item.item_nombre || item.nombre || 'Producto'}</td>
+                        <td class="py-4 text-right text-gray-500">${formatoMoneda.format(precioUnit)}</td>
+                        <td class="py-4 text-center">
+                            <span class="px-2 py-1 text-xs rounded-full font-medium capitalize ${estiloEstado}">
+                                ${item.estado}
+                            </span>
+                        </td>
+                        <td class="py-4 text-right font-bold text-gray-900">${formatoMoneda.format(totalItem)}</td>
+                    `;
+                    tbody.appendChild(tr);
+                });
+
+                this.actualizarTotales(subtotal);
+            },
+
+            // Leer descuento del input y aplicar
+            aplicarDescuento() {
+                const inputDesc = document.getElementById('input-descuento');
+                let valor = parseFloat(inputDesc.value);
+                
+                if (isNaN(valor) || valor < 0) valor = 0;
+                if (valor > 100) valor = 100;
+                
+                inputDesc.value = valor; // corregir input si era inválido
+                this.descuentoAplicado = valor;
+                
+                // Forzar recálculo
+                if (this.pedidoActual) {
+                    const subtotal = this.pedidoActual.items.reduce((acc, i) => acc + (i.cantidad * i.precio_unitario), 0);
+                    this.actualizarTotales(subtotal);
+                }
+            },
+
+            // Actualizar zona de resumen monetario
+            actualizarTotales(subtotal) {
+                const montoDescuento = subtotal * (this.descuentoAplicado / 100);
+                const total = subtotal - montoDescuento;
+
+                document.getElementById('resumen-subtotal').textContent = formatoMoneda.format(subtotal);
+                
+                const filaDescuento = document.getElementById('fila-descuento');
+                if (this.descuentoAplicado > 0) {
+                    filaDescuento.classList.remove('hidden');
+                    document.getElementById('texto-porcentaje').textContent = this.descuentoAplicado;
+                    document.getElementById('resumen-descuento').textContent = `-${formatoMoneda.format(montoDescuento)}`;
+                } else {
+                    filaDescuento.classList.add('hidden');
+                }
+
+                document.getElementById('resumen-total').textContent = formatoMoneda.format(total);
+                
+                // Guardar total calculado para facilitar el proceso de pago
+                this.pedidoActual.totalCalculado = total;
+            },
+
+            // Enviar petición de cobro
+            async procesarPago() {
+                if (!this.pedidoActual) return;
+
+                // Confirmación simple
+                if (!confirm(`¿Confirmas el cobro de ${formatoMoneda.format(this.pedidoActual.totalCalculado)}?`)) {
+                    return;
+                }
+
+                const payload = {
+                    metodo_pago: this.metodoPagoSeleccionado,
+                    descuento_porcentaje: this.descuentoAplicado
+                };
+
+                try {
+                    const respuesta = await fetch(`/api/pedidos/${this.pedidoActual.id}/pagar`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(payload)
+                    }).catch(() => null);
+
+                    if (respuesta && respuesta.ok) {
+                        this.mostrarNotificacion("Pago procesado exitosamente", "success");
+                    } else {
+                        // Simular éxito para MVP visual
+                        this.mostrarNotificacion("Pago procesado localmente (Modo Mock)", "success");
+                        
+                        // Añadir al registro de pagos recientes
+                        this.registrarPagoLocal();
+                        
+                        // Actualizar estado de la mesa a libre
+                        const mesa = this.mesas.find(m => m.id === this.mesaSeleccionada.id);
+                        if(mesa) {
+                            mesa.estado = 'libre';
+                            delete mesa.ticket;
+                        }
+                        
+                        this.renderizarMesas();
+                        this.limpiarPanelDerecho();
+                    }
+                } catch (error) {
+                    this.mostrarNotificacion("Error de red al procesar el pago", "error");
+                    console.error(error);
+                }
+            },
+
+            // Mock: Añadir pago al listado inferior de forma local
+            registrarPagoLocal() {
+                const pago = {
+                    ticket: this.pedidoActual.ticket,
+                    mesa: this.pedidoActual.mesa_numero,
+                    total: this.pedidoActual.totalCalculado,
+                    metodo: this.metodoPagoSeleccionado,
+                    hora: new Date().toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' })
+                };
+                
+                this.pagosRecientes.unshift(pago); // Añadir al inicio
+                if (this.pagosRecientes.length > 10) this.pagosRecientes.pop(); // Mantener solo 10
+                
+                this.renderizarPagosRecientes();
+            },
+
+            // Dibujar la cinta de pagos
+            renderizarPagosRecientes() {
+                const contenedor = document.getElementById('contenedor-pagos');
+                
+                if (this.pagosRecientes.length === 0) return;
+                
+                contenedor.innerHTML = ''; // Limpiar
+
+                this.pagosRecientes.forEach(pago => {
+                    // Elegir icono por método
+                    let icono = 'banknote';
+                    if (pago.metodo === 'tarjeta') icono = 'credit-card';
+                    if (pago.metodo === 'mixto') icono = 'wallet';
+
+                    const card = document.createElement('div');
+                    card.className = "flex-shrink-0 bg-gray-50 border border-gray-200 rounded-lg p-3 w-64 flex flex-col gap-2";
+                    card.innerHTML = `
+                        <div class="flex justify-between items-center text-sm font-bold text-gray-800">
+                            <span>${pago.ticket} <span class="text-gray-400 font-normal">| Mesa ${pago.mesa}</span></span>
+                            <span class="text-green-600">${formatoMoneda.format(pago.total)}</span>
+                        </div>
+                        <div class="flex justify-between items-center text-xs text-gray-500">
+                            <span class="flex items-center gap-1 capitalize"><i data-lucide="${icono}" class="w-3 h-3"></i> ${pago.metodo}</span>
+                            <span class="flex items-center gap-1"><i data-lucide="clock" class="w-3 h-3"></i> ${pago.hora}</span>
+                        </div>
+                    `;
+                    contenedor.appendChild(card);
+                });
+                
+                lucide.createIcons();
+            },
+
+            // Simular impresión
+            imprimirCuenta() {
+                if (!this.pedidoActual) return;
+                this.mostrarNotificacion("Enviando cuenta a impresora térmica...", "info");
+            },
+
+            // Utilidad para mostrar notificaciones flotantes (Toast)
+            mostrarNotificacion(mensaje, tipo = 'info') {
+                const toast = document.getElementById('notificacion-toast');
+                toast.textContent = mensaje;
+                
+                // Colores
+                toast.className = "absolute top-4 left-1/2 transform -translate-x-1/2 px-6 py-3 rounded-lg shadow-lg text-white font-medium text-sm transition-opacity duration-300 z-50 flex items-center gap-2";
+                
+                if (tipo === 'success') toast.classList.add('bg-green-600');
+                else if (tipo === 'error') toast.classList.add('bg-red-600');
+                else toast.classList.add('bg-blue-600');
+                
+                // Mostrar
+                toast.classList.remove('opacity-0');
+                
+                // Ocultar tras 3s
+                setTimeout(() => {
+                    toast.classList.add('opacity-0');
+                }, 3000);
+            }
+        };
+
+        // Arrancar la app al cargar el DOM
+        document.addEventListener('DOMContentLoaded', () => {
+            TPV.init();
+        });
+
+    </script>
+</body>
+</html>

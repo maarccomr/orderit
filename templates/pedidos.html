@@ -1,0 +1,504 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Pedidos - La Buena Mesa</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.5/socket.io.min.js"></script>
+    <!-- Configuración de Tailwind para usar el color indigo -->
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        indigo: {
+                            600: '#4f46e5',
+                            700: '#4338ca',
+                        }
+                    }
+                }
+            }
+        }
+    </script>
+    <style>
+        /* Estilos personalizados para el scrollbar horizontal y notificaciones */
+        .no-scrollbar::-webkit-scrollbar {
+            display: none;
+        }
+        .no-scrollbar {
+            -ms-overflow-style: none;
+            scrollbar-width: none;
+        }
+        .toast-enter {
+            transform: translateX(100%);
+            opacity: 0;
+        }
+        .toast-enter-active {
+            transform: translateX(0);
+            opacity: 1;
+            transition: all 0.3s ease-in-out;
+        }
+        .toast-leave-active {
+            transform: translateX(100%);
+            opacity: 0;
+            transition: all 0.3s ease-in-out;
+        }
+    </style>
+</head>
+<body class="bg-gray-50 text-gray-800 h-screen flex flex-col md:flex-row overflow-hidden">
+
+    <!-- Notificaciones Toast -->
+    <div id="toast-container" class="fixed top-4 right-4 z-50 flex flex-col gap-2 pointer-events-none"></div>
+
+    <!-- Panel Izquierdo: Menú principal -->
+    <main class="flex-1 flex flex-col h-full overflow-hidden w-full md:w-2/3">
+        
+        <!-- Cabecera Mejorada -->
+        <header class="bg-white border-b border-slate-200/80 px-5 py-3 flex items-center justify-between z-10 shrink-0 shadow-sm">
+            <div class="flex items-center gap-4">
+                <div class="flex items-center gap-2">
+                    <span class="w-8 h-8 rounded-lg bg-indigo-600 flex items-center justify-center text-white text-base font-bold shadow-sm">🍽️</span>
+                    <h1 class="text-lg font-bold text-slate-900 tracking-tight">Comandas & Pedidos</h1>
+                    <div id="connection-status" class="w-2.5 h-2.5 rounded-full bg-red-500 ml-1 transition-colors" title="Desconectado"></div>
+                </div>
+
+                <!-- Enlaces rápidos a las otras pantallas -->
+                <nav class="hidden lg:flex items-center gap-1 bg-slate-100 p-1 rounded-xl text-xs font-medium text-slate-600">
+                    <a href="/cocina" class="px-2.5 py-1 rounded-lg hover:text-slate-900 hover:bg-white transition-all flex items-center gap-1 text-amber-700">
+                        🍳 Cocina
+                    </a>
+                    <a href="/caja" class="px-2.5 py-1 rounded-lg hover:text-slate-900 hover:bg-white transition-all flex items-center gap-1 text-emerald-700">
+                        💳 Caja
+                    </a>
+                    <a href="/gestion" class="px-2.5 py-1 rounded-lg hover:text-slate-900 hover:bg-white transition-all flex items-center gap-1 text-indigo-700">
+                        ⚙️ Gestión
+                    </a>
+                </nav>
+            </div>
+            
+            <!-- Selector de Mesa estilizado -->
+            <div class="flex items-center gap-2">
+                <label for="mesa-selector" class="text-xs font-bold text-slate-500 uppercase tracking-wider hidden sm:block">Mesa:</label>
+                <select id="mesa-selector" class="border border-slate-300 rounded-xl px-3 py-1.5 text-xs font-bold focus:outline-none focus:ring-2 focus:ring-indigo-600/20 focus:border-indigo-600 bg-white shadow-sm text-slate-800">
+                    <option value="">Seleccione mesa...</option>
+                    <!-- Opciones de mesas inyectadas por JS -->
+                </select>
+            </div>
+        </header>
+
+        <!-- Categorías -->
+        <div class="bg-white border-b border-gray-200 px-4 py-3 shadow-sm z-10">
+            <div id="categorias-container" class="flex gap-2 overflow-x-auto no-scrollbar pb-1">
+                <!-- Píldoras de categorías inyectadas por JS -->
+            </div>
+        </div>
+
+        <!-- Grid de Productos -->
+        <div class="flex-1 overflow-y-auto p-4 bg-gray-50">
+            <div id="menu-grid" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 pb-20 md:pb-4">
+                <!-- Tarjetas de productos inyectadas por JS -->
+            </div>
+        </div>
+    </main>
+
+    <!-- Panel Derecho / Bottom Sheet: Resumen del Pedido -->
+    <aside class="fixed bottom-0 left-0 w-full md:static md:w-1/3 md:h-full bg-white shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.1)] md:shadow-[-4px_0_6px_-1px_rgba(0,0,0,0.05)] flex flex-col transition-transform duration-300 transform translate-y-full md:translate-y-0 z-40" id="order-sidebar">
+        
+        <!-- Botón para mostrar/ocultar en móvil -->
+        <button id="toggle-order-btn" class="md:hidden absolute -top-12 left-0 w-full bg-indigo-600 text-white py-3 rounded-t-xl font-semibold shadow-lg flex justify-between px-6 items-center">
+            <span>Ver Pedido</span>
+            <span id="mobile-order-total">€0.00</span>
+        </button>
+
+        <div class="p-4 border-b border-gray-200 bg-white flex justify-between items-center hidden md:flex">
+            <h2 class="text-lg font-bold">Resumen del Pedido</h2>
+            <button onclick="PedidoApp.limpiarPedido()" class="text-red-500 hover:text-red-700 text-sm font-medium">Limpiar</button>
+        </div>
+
+        <!-- Lista de Items del Pedido -->
+        <div id="order-items" class="flex-1 overflow-y-auto p-4 space-y-4 bg-white min-h-[40vh] md:min-h-0">
+            <!-- Items de pedido inyectados por JS -->
+            <div class="text-center text-gray-500 mt-10 empty-state">El pedido está vacío.</div>
+        </div>
+
+        <!-- Pie de página del Pedido -->
+        <div class="border-t border-gray-200 bg-gray-50 p-4">
+            <textarea id="order-notes" rows="2" class="w-full text-sm border border-gray-300 rounded-md p-2 mb-3 focus:outline-none focus:ring-2 focus:ring-indigo-600" placeholder="Notas para la cocina..."></textarea>
+            
+            <div class="flex justify-between items-center mb-4 text-lg font-bold">
+                <span>Subtotal</span>
+                <span id="order-subtotal">€0.00</span>
+            </div>
+            
+            <div class="flex gap-2">
+                <button onclick="PedidoApp.limpiarPedido()" class="md:hidden w-1/3 bg-gray-200 text-red-600 py-3 rounded-md font-semibold hover:bg-gray-300 transition-colors">Vaciar</button>
+                <button onclick="PedidoApp.enviarPedido()" class="flex-1 bg-indigo-600 text-white py-3 rounded-md font-semibold hover:bg-indigo-700 transition-colors flex justify-center items-center gap-2">
+                    Enviar Pedido
+                </button>
+            </div>
+        </div>
+    </aside>
+
+    <script>
+        const PedidoApp = {
+            socket: null,
+            menu: [],
+            categorias: [],
+            mesas: [],
+            categoriaActiva: null,
+            mesaSeleccionada: null,
+            pedidoActual: { items: [], notas: '' },
+            isSidebarOpen: false,
+            
+            init() {
+                this.conectar();
+                this.cargarMesas();
+                this.cargarMenu();
+                
+                // Eventos del UI
+                document.getElementById('mesa-selector').addEventListener('change', (e) => {
+                    this.mesaSeleccionada = e.target.value;
+                });
+                
+                document.getElementById('order-notes').addEventListener('input', (e) => {
+                    this.pedidoActual.notas = e.target.value;
+                });
+
+                document.getElementById('toggle-order-btn').addEventListener('click', () => {
+                    this.isSidebarOpen = !this.isSidebarOpen;
+                    const sidebar = document.getElementById('order-sidebar');
+                    if(this.isSidebarOpen) {
+                        sidebar.classList.remove('translate-y-full');
+                        sidebar.classList.add('translate-y-0');
+                    } else {
+                        sidebar.classList.add('translate-y-full');
+                        sidebar.classList.remove('translate-y-0');
+                    }
+                });
+            },
+            
+            conectar() {
+                try {
+                    this.socket = io();
+                    
+                    this.socket.on('connect', () => {
+                        const status = document.getElementById('connection-status');
+                        status.classList.remove('bg-red-500');
+                        status.classList.add('bg-green-500');
+                        status.title = 'Conectado';
+                    });
+                    
+                    this.socket.on('disconnect', () => {
+                        const status = document.getElementById('connection-status');
+                        status.classList.remove('bg-green-500');
+                        status.classList.add('bg-red-500');
+                        status.title = 'Desconectado';
+                    });
+
+                    this.socket.on('pedido_creado', (data) => {
+                        this.mostrarNotificacion(`Pedido enviado exitosamente. Ticket #${data.id}`, 'success');
+                        this.limpiarPedido();
+                        // Ocultar sidebar en móvil si estaba abierto
+                        this.isSidebarOpen = false;
+                        document.getElementById('order-sidebar').classList.add('translate-y-full');
+                        document.getElementById('order-sidebar').classList.remove('translate-y-0');
+                    });
+                    
+                    this.socket.on('estado_pedido_actualizado', (data) => {
+                        if (data.mesa_id == this.mesaSeleccionada) {
+                            this.mostrarNotificacion(`Actualización: Pedido de su mesa ahora es ${data.estado}`, 'info');
+                        }
+                    });
+                } catch (e) {
+                    console.error("Error conectando a socket.io", e);
+                }
+            },
+            
+            async cargarMenu() {
+                try {
+                    const response = await fetch('/api/menu');
+                    const categoriasAPI = await response.json();
+                    
+                    // La API devuelve [{id, nombre, items: [...]}]
+                    // Guardamos las categorías y aplanamos los items para búsqueda rápida
+                    this.categorias = categoriasAPI.map(c => ({ id: c.id, nombre: c.nombre }));
+                    this.menu = [];
+                    categoriasAPI.forEach(cat => {
+                        if (cat.items && cat.items.length > 0) {
+                            cat.items.forEach(item => {
+                                item.categoria_id = cat.id;
+                                item.categoria_nombre = cat.nombre;
+                                this.menu.push(item);
+                            });
+                        }
+                    });
+                    
+                    if (this.categorias.length > 0) {
+                        this.categoriaActiva = this.categorias[0].id;
+                    }
+                    
+                    this.renderizarCategorias();
+                    this.renderizarMenu();
+                } catch (error) {
+                    console.error('Error cargando menú:', error);
+                    this.mostrarNotificacion('Error al cargar el menú', 'error');
+                }
+            },
+            
+            async cargarMesas() {
+                try {
+                    const response = await fetch('/api/mesas');
+                    const todasLasMesas = await response.json();
+                    this.mesas = todasLasMesas.filter(m => m.estado === 'libre' || m.estado === 'ocupada');
+                    this.renderizarOpcionesMesas();
+                } catch (error) {
+                    console.error('Error cargando mesas:', error);
+                }
+            },
+            
+            renderizarOpcionesMesas() {
+                const selector = document.getElementById('mesa-selector');
+                // Guardar la opción por defecto
+                const defaultOption = selector.options[0];
+                selector.innerHTML = '';
+                selector.appendChild(defaultOption);
+                
+                this.mesas.forEach(mesa => {
+                    const opt = document.createElement('option');
+                    opt.value = mesa.id;
+                    opt.textContent = `Mesa ${mesa.numero} (${mesa.estado})`;
+                    selector.appendChild(opt);
+                });
+            },
+            
+            renderizarCategorias() {
+                const container = document.getElementById('categorias-container');
+                container.innerHTML = '';
+                
+                this.categorias.forEach(cat => {
+                    const btn = document.createElement('button');
+                    const isActive = cat.id === this.categoriaActiva;
+                    btn.className = `whitespace-nowrap px-4 py-2 rounded-full text-sm font-medium transition-colors ${isActive ? 'bg-indigo-600 text-white' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'}`;
+                    btn.textContent = cat.nombre;
+                    btn.onclick = () => {
+                        this.categoriaActiva = cat.id;
+                        this.renderizarCategorias();
+                        this.renderizarMenu();
+                    };
+                    container.appendChild(btn);
+                });
+            },
+            
+            renderizarMenu() {
+                const container = document.getElementById('menu-grid');
+                container.innerHTML = '';
+                
+                const itemsFiltrados = this.categoriaActiva 
+                    ? this.menu.filter(i => i.categoria_id === this.categoriaActiva)
+                    : this.menu;
+
+                if (itemsFiltrados.length === 0) {
+                    container.innerHTML = '<div class="col-span-full text-center text-gray-400 py-10">No hay items en esta categoría</div>';
+                    return;
+                }
+                    
+                itemsFiltrados.forEach(item => {
+                    const disponible = item.disponible !== false; // por defecto true
+                    const precio = parseFloat(item.precio || 0).toFixed(2);
+                    const card = document.createElement('div');
+                    card.className = `bg-white rounded-lg shadow-sm border border-gray-200 p-4 flex flex-col justify-between ${!disponible ? 'opacity-60' : 'hover:shadow-md transition-shadow cursor-pointer'}`;
+                    
+                    card.innerHTML = `
+                        <div class="flex justify-between items-start mb-2">
+                            <h3 class="font-bold text-gray-900 line-clamp-2 pr-2">${item.nombre}</h3>
+                            <span class="font-semibold text-indigo-700 whitespace-nowrap text-lg">€${precio}</span>
+                        </div>
+                        <p class="text-sm text-gray-500 mb-4 line-clamp-2 flex-1">${item.descripcion || ''}</p>
+                        <div class="mt-auto pt-2 border-t border-gray-100 flex justify-between items-center">
+                            <span class="text-xs text-gray-400">${item.tiempo_preparacion_min || 10} min</span>
+                            ${disponible 
+                                ? `<button class="add-item-btn bg-indigo-600 text-white hover:bg-indigo-700 rounded-full w-9 h-9 flex items-center justify-center transition-colors shadow-sm text-xl font-bold" data-id="${item.id}" title="Añadir al pedido">+</button>`
+                                : `<span class="text-xs font-medium bg-gray-100 text-gray-500 px-2 py-1 rounded">No disponible</span>`
+                            }
+                        </div>
+                    `;
+                    
+                    if (disponible) {
+                        card.addEventListener('click', () => {
+                            this.agregarItem(item.id);
+                        });
+                        const addBtn = card.querySelector('.add-item-btn');
+                        if (addBtn) {
+                            addBtn.addEventListener('click', (e) => {
+                                e.stopPropagation();
+                                this.agregarItem(item.id);
+                            });
+                        }
+                    }
+                    
+                    container.appendChild(card);
+                });
+            },
+            
+            agregarItem(itemMenuId) {
+                const itemMenu = this.menu.find(i => i.id === itemMenuId);
+                if (!itemMenu || !itemMenu.disponible) return;
+                
+                // Buscar si ya existe en el pedido
+                const itemExistente = this.pedidoActual.items.find(i => i.item_menu_id === itemMenuId && !i.notas);
+                
+                if (itemExistente) {
+                    itemExistente.cantidad++;
+                } else {
+                    this.pedidoActual.items.push({
+                        item_menu_id: itemMenu.id,
+                        nombre: itemMenu.nombre,
+                        precio: itemMenu.precio,
+                        cantidad: 1,
+                        notas: ''
+                    });
+                }
+                
+                this.actualizarResumen();
+                this.mostrarNotificacion(`${itemMenu.nombre} agregado al pedido`, 'success');
+            },
+            
+            eliminarItem(index) {
+                this.pedidoActual.items.splice(index, 1);
+                this.actualizarResumen();
+            },
+            
+            cambiarCantidad(index, delta) {
+                const item = this.pedidoActual.items[index];
+                item.cantidad += delta;
+                
+                if (item.cantidad <= 0) {
+                    this.eliminarItem(index);
+                } else {
+                    this.actualizarResumen();
+                }
+            },
+            
+            actualizarNotaItem(index, valor) {
+                this.pedidoActual.items[index].notas = valor;
+            },
+            
+            actualizarResumen() {
+                const container = document.getElementById('order-items');
+                
+                // Limpiar items pero conservar empty-state si existe
+                container.innerHTML = '';
+                
+                if (this.pedidoActual.items.length === 0) {
+                    container.innerHTML = '<div class="text-center text-gray-500 mt-10 empty-state">El pedido está vacío.</div>';
+                    document.getElementById('order-subtotal').textContent = '€0.00';
+                    document.getElementById('mobile-order-total').textContent = '€0.00';
+                    return;
+                }
+                
+                let total = 0;
+                
+                this.pedidoActual.items.forEach((item, index) => {
+                    const lineTotal = item.cantidad * item.precio;
+                    total += lineTotal;
+                    
+                    const row = document.createElement('div');
+                    row.className = 'border border-gray-100 rounded-lg p-3 bg-gray-50 mb-3';
+                    
+                    row.innerHTML = `
+                        <div class="flex justify-between items-start mb-2">
+                            <span class="font-medium text-sm text-gray-800">${item.nombre}</span>
+                            <span class="font-semibold text-sm">€${lineTotal.toFixed(2)}</span>
+                        </div>
+                        <div class="flex justify-between items-center mb-2">
+                            <div class="flex items-center border border-gray-300 rounded bg-white">
+                                <button onclick="PedidoApp.cambiarCantidad(${index}, -1)" class="px-2 py-1 text-gray-600 hover:bg-gray-100 rounded-l">-</button>
+                                <span class="px-3 py-1 text-sm font-medium border-x border-gray-300">${item.cantidad}</span>
+                                <button onclick="PedidoApp.cambiarCantidad(${index}, 1)" class="px-2 py-1 text-gray-600 hover:bg-gray-100 rounded-r">+</button>
+                            </div>
+                            <button onclick="PedidoApp.eliminarItem(${index})" class="text-red-500 p-1 hover:bg-red-50 rounded">
+                                <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M9 2a1 1 0 00-.894.553L7.382 4H4a1 1 0 000 2v10a2 2 0 002 2h8a2 2 0 002-2V6a1 1 0 100-2h-3.382l-.724-1.447A1 1 0 0011 2H9zM7 8a1 1 0 012 0v6a1 1 0 11-2 0V8zm5-1a1 1 0 00-1 1v6a1 1 0 102 0V8a1 1 0 00-1-1z" clip-rule="evenodd" /></svg>
+                            </button>
+                        </div>
+                        <input type="text" class="w-full text-xs border border-gray-200 rounded p-1.5 focus:outline-none focus:border-indigo-400" placeholder="Sin cebolla, extra salsa..." value="${item.notas || ''}" onchange="PedidoApp.actualizarNotaItem(${index}, this.value)">
+                    `;
+                    
+                    container.appendChild(row);
+                });
+                
+                const totalFormateado = `€${total.toFixed(2)}`;
+                document.getElementById('order-subtotal').textContent = totalFormateado;
+                document.getElementById('mobile-order-total').textContent = totalFormateado;
+            },
+            
+            enviarPedido() {
+                if (!this.mesaSeleccionada) {
+                    this.mostrarNotificacion('Debe seleccionar una mesa', 'error');
+                    return;
+                }
+                
+                if (this.pedidoActual.items.length === 0) {
+                    this.mostrarNotificacion('El pedido está vacío', 'error');
+                    return;
+                }
+                
+                // Limpiar items para enviar solo lo necesario
+                const itemsAEnviar = this.pedidoActual.items.map(i => ({
+                    item_menu_id: i.item_menu_id,
+                    cantidad: i.cantidad,
+                    notas: i.notas
+                }));
+                
+                const payload = {
+                    mesa_id: parseInt(this.mesaSeleccionada),
+                    items: itemsAEnviar,
+                    notas: this.pedidoActual.notas
+                };
+                
+                if (this.socket && this.socket.connected) {
+                    this.socket.emit('nuevo_pedido', payload);
+                    // El servidor debe responder con el evento 'pedido_creado'
+                } else {
+                    this.mostrarNotificacion('No hay conexión con el servidor', 'error');
+                }
+            },
+            
+            limpiarPedido() {
+                this.pedidoActual = { items: [], notas: '' };
+                document.getElementById('order-notes').value = '';
+                this.actualizarResumen();
+            },
+            
+            mostrarNotificacion(mensaje, tipo = 'info') {
+                const container = document.getElementById('toast-container');
+                const toast = document.createElement('div');
+                
+                let bgClass = 'bg-blue-600';
+                if (tipo === 'success') bgClass = 'bg-green-600';
+                if (tipo === 'error') bgClass = 'bg-red-600';
+                
+                toast.className = `${bgClass} text-white px-4 py-3 rounded shadow-lg flex items-center gap-2 max-w-sm toast-enter-active pointer-events-auto`;
+                toast.innerHTML = `
+                    <span class="flex-1 text-sm font-medium">${mensaje}</span>
+                `;
+                
+                container.appendChild(toast);
+                
+                setTimeout(() => {
+                    toast.classList.remove('toast-enter-active');
+                    toast.classList.add('toast-leave-active');
+                    setTimeout(() => {
+                        if(container.contains(toast)) container.removeChild(toast);
+                    }, 300); // duración de la transición
+                }, 3000);
+            }
+        };
+
+        // Inicializar aplicación
+        document.addEventListener('DOMContentLoaded', () => {
+            PedidoApp.init();
+        });
+    </script>
+</body>
+</html>

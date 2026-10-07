@@ -1,0 +1,588 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>La Buena Mesa — Panel de Cocina KDS</title>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Socket.IO -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.5/socket.io.min.js"></script>
+    <!-- Lucide Icons -->
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        kds: {
+                            dark: '#0f172a',
+                            card: '#1e293b',
+                            cardHover: '#243248',
+                            border: '#334155'
+                        }
+                    },
+                    animation: {
+                        'pulse-slow': 'pulse 3s cubic-bezier(0.4, 0, 0.6, 1) infinite',
+                        'pulse-urgent': 'pulse 1s cubic-bezier(0.4, 0, 0.6, 1) infinite',
+                    }
+                }
+            }
+        }
+    </script>
+    <style>
+        body { overflow: hidden; }
+        .custom-scroll::-webkit-scrollbar { width: 6px; height: 6px; }
+        .custom-scroll::-webkit-scrollbar-track { background: #0f172a; }
+        .custom-scroll::-webkit-scrollbar-thumb { background: #334155; border-radius: 9999px; }
+        .custom-scroll::-webkit-scrollbar-thumb:hover { background: #475569; }
+        .ticket-enter { animation: slideDown 0.35s cubic-bezier(0.16, 1, 0.3, 1); }
+        @keyframes slideDown {
+            from { opacity: 0; transform: translateY(-16px) scale(0.97); }
+            to { opacity: 1; transform: translateY(0) scale(1); }
+        }
+    </style>
+</head>
+<body class="bg-slate-950 text-slate-100 font-sans h-screen flex flex-col select-none antialiased">
+
+    <!-- BARRA SUPERIOR PROFESIONAL -->
+    <header class="bg-slate-900/90 backdrop-blur-md border-b border-slate-800 px-6 py-3 flex justify-between items-center shadow-lg z-20 shrink-0">
+        <!-- Logo y navegación cruzada -->
+        <div class="flex items-center gap-6">
+            <div class="flex items-center gap-3">
+                <div class="w-10 h-10 rounded-xl bg-gradient-to-tr from-amber-500 to-orange-500 flex items-center justify-center shadow-lg shadow-orange-500/20 text-white font-bold text-xl">
+                    🍳
+                </div>
+                <div>
+                    <div class="flex items-center gap-2">
+                        <h1 class="text-lg font-bold tracking-tight text-white">Cocina & Comandas</h1>
+                        <span class="text-[10px] font-semibold tracking-wider uppercase px-2 py-0.5 rounded bg-amber-500/10 text-amber-400 border border-amber-500/20">KDS v2.0</span>
+                    </div>
+                    <p class="text-xs text-slate-400">Pantalla de producción en tiempo real</p>
+                </div>
+            </div>
+
+            <!-- Accesos a otros módulos del restaurante -->
+            <nav class="hidden lg:flex items-center gap-1 bg-slate-950/60 p-1 rounded-xl border border-slate-800 text-xs">
+                <a href="/pedidos" class="px-3 py-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition-colors flex items-center gap-1.5">
+                    <i data-lucide="smartphone" class="w-3.5 h-3.5"></i> Comandas
+                </a>
+                <a href="/caja" class="px-3 py-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition-colors flex items-center gap-1.5">
+                    <i data-lucide="calculator" class="w-3.5 h-3.5"></i> TPV / Caja
+                </a>
+                <a href="/gestion" class="px-3 py-1.5 rounded-lg text-amber-400 font-medium hover:bg-amber-500/10 transition-colors flex items-center gap-1.5">
+                    <i data-lucide="settings" class="w-3.5 h-3.5"></i> Panel Gestión
+                </a>
+            </nav>
+        </div>
+
+        <!-- Indicador de conexión, contadores y reloj -->
+        <div class="flex items-center gap-6">
+            <!-- Conexión -->
+            <div class="flex items-center gap-2 px-3 py-1.5 rounded-full bg-slate-800/80 border border-slate-700/60 text-xs">
+                <span id="conexion-indicador" class="w-2.5 h-2.5 rounded-full bg-red-500 transition-all duration-300"></span>
+                <span id="conexion-texto" class="font-medium text-slate-300">Conectando...</span>
+            </div>
+
+            <!-- Métricas rápidas -->
+            <div class="flex items-center gap-4 border-l border-slate-800 pl-6">
+                <div class="text-center">
+                    <span class="text-[10px] uppercase font-bold tracking-wider text-slate-400 block">Pendientes</span>
+                    <span id="contador-pendientes" class="text-lg font-black text-amber-400">0</span>
+                </div>
+                <div class="text-center">
+                    <span class="text-[10px] uppercase font-bold tracking-wider text-slate-400 block">En Proceso</span>
+                    <span id="contador-preparando" class="text-lg font-black text-sky-400">0</span>
+                </div>
+                <div class="text-center">
+                    <span class="text-[10px] uppercase font-bold tracking-wider text-slate-400 block">Listos</span>
+                    <span id="contador-listos" class="text-lg font-black text-emerald-400">0</span>
+                </div>
+            </div>
+
+            <!-- Reloj y Sonido -->
+            <div class="flex items-center gap-3 border-l border-slate-800 pl-6">
+                <button id="btn-audio" onclick="KDS.toggleAudio()" title="Activar/Silenciar sonido de aviso" class="w-9 h-9 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-700 flex items-center justify-center text-slate-300 hover:text-white transition-colors">
+                    <i data-lucide="volume-2" id="icon-audio" class="w-4 h-4 text-emerald-400"></i>
+                </button>
+                <div class="text-right">
+                    <div id="reloj-hora" class="text-xl font-bold font-mono tracking-tight text-white leading-none">00:00:00</div>
+                    <div id="reloj-fecha" class="text-[11px] text-slate-400 capitalize mt-0.5">---</div>
+                </div>
+            </div>
+        </div>
+    </header>
+
+    <!-- BARRA DE FILTROS Y ACCIONES -->
+    <div class="bg-slate-900/60 border-b border-slate-800/80 px-6 py-2.5 flex justify-between items-center z-10 shrink-0">
+        <div class="flex items-center gap-2">
+            <span class="text-xs font-semibold text-slate-400 uppercase tracking-wider mr-2">Filtrar:</span>
+            <button onclick="KDS.filtrarPor('todos')" id="btn-filtro-todos" class="filtro-btn px-4 py-1.5 rounded-lg text-xs font-semibold transition-all bg-amber-500 text-slate-950 shadow-md shadow-amber-500/20">
+                Todos (<span id="count-filtro-todos">0</span>)
+            </button>
+            <button onclick="KDS.filtrarPor('pendiente')" id="btn-filtro-pendiente" class="filtro-btn px-4 py-1.5 rounded-lg text-xs font-semibold transition-all bg-slate-800/80 hover:bg-slate-700 text-slate-300">
+                Pendientes (<span id="count-filtro-pendiente">0</span>)
+            </button>
+            <button onclick="KDS.filtrarPor('preparando')" id="btn-filtro-preparando" class="filtro-btn px-4 py-1.5 rounded-lg text-xs font-semibold transition-all bg-slate-800/80 hover:bg-slate-700 text-slate-300">
+                Preparando (<span id="count-filtro-preparando">0</span>)
+            </button>
+            <button onclick="KDS.filtrarPor('listo')" id="btn-filtro-listo" class="filtro-btn px-4 py-1.5 rounded-lg text-xs font-semibold transition-all bg-slate-800/80 hover:bg-slate-700 text-slate-300">
+                Listos (<span id="count-filtro-listo">0</span>)
+            </button>
+        </div>
+
+        <div class="flex items-center gap-3">
+            <span class="flex items-center gap-1.5 text-xs text-slate-400">
+                <span class="w-2 h-2 rounded-full bg-emerald-400"></span> Normal (&lt;10m)
+            </span>
+            <span class="flex items-center gap-1.5 text-xs text-slate-400">
+                <span class="w-2 h-2 rounded-full bg-amber-400"></span> Alerta (10-15m)
+            </span>
+            <span class="flex items-center gap-1.5 text-xs text-slate-400">
+                <span class="w-2 h-2 rounded-full bg-rose-500 animate-pulse"></span> Crítico (&gt;15m)
+            </span>
+            <button onclick="KDS.cargarPedidosActivos()" class="ml-2 px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 border border-slate-700 text-xs text-slate-200 transition-colors flex items-center gap-1.5">
+                <i data-lucide="refresh-cw" class="w-3.5 h-3.5"></i> Actualizar
+            </button>
+        </div>
+    </div>
+
+    <!-- ÁREA DE TICKETS (GRID DINÁMICO) -->
+    <main class="flex-1 custom-scroll overflow-y-auto p-6">
+        <div id="grid-tickets" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5 gap-5 items-start">
+            <!-- Estado vacío con diseño elegante -->
+            <div id="mensaje-vacio" class="col-span-full py-28 text-center flex flex-col items-center justify-center">
+                <div class="w-20 h-20 rounded-3xl bg-slate-900 border border-slate-800 flex items-center justify-center text-4xl mb-4 shadow-xl text-slate-600">
+                    👨‍🍳
+                </div>
+                <h3 class="text-xl font-bold text-slate-200">¡Cocina al día! Sin comandas pendientes</h3>
+                <p class="text-sm text-slate-400 max-w-sm mt-1">Los nuevos pedidos enviados desde sala aparecerán automáticamente con sonido y animación aquí.</p>
+                <a href="/pedidos" class="mt-6 px-4 py-2 rounded-xl bg-amber-500/10 hover:bg-amber-500/20 text-amber-400 border border-amber-500/30 text-xs font-semibold transition-colors flex items-center gap-2">
+                    <i data-lucide="plus-circle" class="w-4 h-4"></i> Crear una comanda de prueba
+                </a>
+            </div>
+        </div>
+    </main>
+
+    <!-- MÓDULO JS KDS PROFESIONAL -->
+    <script>
+        const KDS = {
+            socket: null,
+            pedidos: [],
+            filtroActual: 'todos',
+            audioHabilitado: true,
+            audioCtx: null,
+
+            init() {
+                this.iniciarReloj();
+                this.conectar();
+                this.cargarPedidosActivos();
+
+                // Actualizar tiempos cada segundo
+                setInterval(() => this.actualizarTiemposUI(), 1000);
+
+                // Polling de respaldo cada 12 segundos por si se pierde conexión de socket
+                setInterval(() => this.cargarPedidosActivos(true), 12000);
+
+                lucide.createIcons();
+            },
+
+            iniciarReloj() {
+                const actualizar = () => {
+                    const ahora = new Date();
+                    document.getElementById('reloj-hora').textContent = ahora.toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+                    document.getElementById('reloj-fecha').textContent = ahora.toLocaleDateString('es-ES', { weekday: 'short', day: 'numeric', month: 'short' });
+                };
+                actualizar();
+                setInterval(actualizar, 1000);
+            },
+
+            conectar() {
+                try {
+                    this.socket = io();
+
+                    this.socket.on('connect', () => {
+                        this.actualizarConexionUI(true);
+                        // Refrescar pedidos tras reconexión
+                        this.cargarPedidosActivos(true);
+                    });
+
+                    this.socket.on('disconnect', () => {
+                        this.actualizarConexionUI(false);
+                    });
+
+                    // Evento: nuevo pedido creado
+                    this.socket.on('pedido_creado', (pedido) => {
+                        // Evitar duplicados
+                        const existe = this.pedidos.some(p => p.id === pedido.id);
+                        if (!existe) {
+                            this.pedidos.unshift(pedido);
+                            this.renderizar();
+                            this.sonarAviso();
+                        }
+                    });
+
+                    // Evento: cambio de estado de pedido general
+                    this.socket.on('estado_pedido_actualizado', (data) => {
+                        const idx = this.pedidos.findIndex(p => p.id === data.pedido_id);
+                        if (idx !== -1) {
+                            this.pedidos[idx].estado = data.estado;
+                            if (data.estado === 'listo' && this.pedidos[idx].items) {
+                                this.pedidos[idx].items.forEach(i => i.estado = 'listo');
+                            }
+                            this.renderizar();
+                        } else {
+                            this.cargarPedidosActivos(true);
+                        }
+                    });
+
+                    // Evento: cambio de estado en ítem individual
+                    this.socket.on('estado_item_actualizado', (data) => {
+                        const pedido = this.pedidos.find(p => p.id === data.pedido_id);
+                        if (pedido && pedido.items) {
+                            const item = pedido.items.find(i => i.id === data.item_pedido_id);
+                            if (item) {
+                                item.estado = data.estado;
+                                this.renderizar();
+                            }
+                        }
+                    });
+
+                    // Evento: pedido pagado o cancelado -> quitar de la cocina
+                    this.socket.on('pedido_pagado', (data) => {
+                        const pedidoId = data.id || data.pedido_id;
+                        this.pedidos = this.pedidos.filter(p => p.id !== pedidoId);
+                        this.renderizar();
+                    });
+
+                } catch (e) {
+                    console.error("Error inicializando SocketIO:", e);
+                    this.actualizarConexionUI(false);
+                }
+            },
+
+            async cargarPedidosActivos(silencioso = false) {
+                try {
+                    const res = await fetch('/api/pedidos');
+                    if (!res.ok) throw new Error('Error al consultar /api/pedidos');
+                    const datos = await res.json();
+                    
+                    // Solo conservamos pedidos no pagados/cancelados
+                    this.pedidos = datos.filter(p => p.estado !== 'pagado' && p.estado !== 'cancelado');
+                    this.renderizar();
+                } catch (error) {
+                    if (!silencioso) console.error("Error cargando pedidos:", error);
+                }
+            },
+
+            renderizar() {
+                const contenedor = document.getElementById('grid-tickets');
+                const msjVacio = document.getElementById('mensaje-vacio');
+
+                // Filtrar según botón activo
+                let filtrados = this.pedidos;
+                if (this.filtroActual !== 'todos') {
+                    filtrados = this.pedidos.filter(p => p.estado === this.filtroActual);
+                }
+
+                // Ordenar: Pendientes y Preparando más antiguos primero para no retrasar platos
+                filtrados.sort((a, b) => new Date(a.created_at || 0) - new Date(b.created_at || 0));
+
+                // Limpiar tickets previos (conservando el elemento de vacío)
+                Array.from(contenedor.children).forEach(el => {
+                    if (el.id !== 'mensaje-vacio') el.remove();
+                });
+
+                if (filtrados.length === 0) {
+                    msjVacio.classList.remove('hidden');
+                } else {
+                    msjVacio.classList.add('hidden');
+                    filtrados.forEach(pedido => {
+                        contenedor.insertAdjacentHTML('beforeend', this.generarTicketHTML(pedido));
+                    });
+                }
+
+                this.actualizarContadores();
+                lucide.createIcons();
+            },
+
+            generarTicketHTML(p) {
+                const ticketNumero = p.numero_ticket || `T-${p.id}`;
+                const mesaTexto = p.mesa_numero ? `Mesa ${p.mesa_numero}` : (p.mesa_id ? `Mesa ${p.mesa_id}` : 'Para Llevar');
+                const fechaCreacion = p.created_at || new Date().toISOString();
+
+                // Colores temáticos según estado
+                let badgeEstado = '';
+                let borderHeader = 'border-slate-700';
+                let bgCabecera = 'bg-slate-900';
+
+                if (p.estado === 'pendiente') {
+                    bgCabecera = 'bg-gradient-to-r from-amber-950/80 to-amber-900/40';
+                    borderHeader = 'border-amber-500/40';
+                    badgeEstado = '<span class="px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider bg-amber-500 text-slate-950 shadow-sm shadow-amber-500/30">Pendiente</span>';
+                } else if (p.estado === 'preparando') {
+                    bgCabecera = 'bg-gradient-to-r from-sky-950/80 to-sky-900/40';
+                    borderHeader = 'border-sky-500/40';
+                    badgeEstado = '<span class="px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider bg-sky-500 text-slate-950 shadow-sm shadow-sky-500/30">En Marcha</span>';
+                } else if (p.estado === 'listo') {
+                    bgCabecera = 'bg-gradient-to-r from-emerald-950/80 to-emerald-900/40';
+                    borderHeader = 'border-emerald-500/40';
+                    badgeEstado = '<span class="px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider bg-emerald-500 text-slate-950 shadow-sm shadow-emerald-500/30">Listo</span>';
+                }
+
+                // Generar ítems
+                const items = p.items || [];
+                const itemsHtml = items.map(item => {
+                    const esListo = item.estado === 'listo';
+                    const nombre = item.item_nombre || item.nombre || 'Plato';
+                    return `
+                        <div class="flex items-start justify-between py-2 border-b border-slate-800/80 last:border-0 group transition-colors ${esListo ? 'opacity-40' : ''}">
+                            <div class="flex items-start gap-2.5 flex-1 pr-2">
+                                <span class="w-6 h-6 rounded-md bg-slate-800 text-amber-400 font-black text-xs flex items-center justify-center shrink-0 border border-slate-700">
+                                    ${item.cantidad}
+                                </span>
+                                <div class="min-w-0 flex-1">
+                                    <p class="text-sm font-semibold text-slate-100 leading-snug ${esListo ? 'line-through text-slate-400' : ''}">
+                                        ${nombre}
+                                    </p>
+                                    ${item.notas ? `
+                                        <p class="text-xs text-amber-300/90 font-medium bg-amber-500/10 border-l-2 border-amber-400 pl-1.5 py-0.5 mt-1 rounded-r">
+                                            ⚠️ ${item.notas}
+                                        </p>
+                                    ` : ''}
+                                </div>
+                            </div>
+                            <button onclick="KDS.toggleEstadoItem(${p.id}, ${item.id}, '${esListo ? 'pendiente' : 'listo'}')"
+                                    class="w-7 h-7 rounded-lg flex items-center justify-center transition-all ${esListo ? 'bg-emerald-500 text-slate-950 font-bold' : 'bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white border border-slate-700'}"
+                                    title="${esListo ? 'Marcar pendiente' : 'Marcar este plato como listo'}">
+                                <i data-lucide="${esListo ? 'check' : 'circle'}" class="w-3.5 h-3.5"></i>
+                            </button>
+                        </div>
+                    `;
+                }).join('');
+
+                // Botón principal de avance de estado
+                let botonAccion = '';
+                if (p.estado === 'pendiente') {
+                    botonAccion = `
+                        <button onclick="KDS.cambiarEstadoPedido(${p.id}, 'preparando')"
+                                class="w-full py-2.5 px-4 rounded-xl font-bold text-xs uppercase tracking-wider bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-400 hover:to-orange-400 text-slate-950 shadow-lg shadow-orange-500/20 active:scale-[0.98] transition-all flex items-center justify-center gap-2">
+                            <i data-lucide="flame" class="w-4 h-4"></i> Empezar Preparación
+                        </button>
+                    `;
+                } else if (p.estado === 'preparando') {
+                    botonAccion = `
+                        <button onclick="KDS.cambiarEstadoPedido(${p.id}, 'listo')"
+                                class="w-full py-2.5 px-4 rounded-xl font-bold text-xs uppercase tracking-wider bg-gradient-to-r from-sky-500 to-blue-600 hover:from-sky-400 hover:to-blue-500 text-white shadow-lg shadow-sky-500/20 active:scale-[0.98] transition-all flex items-center justify-center gap-2">
+                            <i data-lucide="check-circle" class="w-4 h-4"></i> Marcar Todo Listo
+                        </button>
+                    `;
+                } else if (p.estado === 'listo') {
+                    botonAccion = `
+                        <div class="flex gap-2">
+                            <button onclick="KDS.cambiarEstadoPedido(${p.id}, 'servido')"
+                                    class="flex-1 py-2.5 px-3 rounded-xl font-bold text-xs uppercase tracking-wider bg-emerald-600 hover:bg-emerald-500 text-white transition-colors flex items-center justify-center gap-1.5">
+                                <i data-lucide="bell" class="w-4 h-4"></i> Servir Comanda
+                            </button>
+                            <button onclick="KDS.cambiarEstadoPedido(${p.id}, 'preparando')"
+                                    title="Regresar a preparación si falta algo"
+                                    class="py-2.5 px-3 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 text-xs">
+                                <i data-lucide="undo-2" class="w-4 h-4"></i>
+                            </button>
+                        </div>
+                    `;
+                }
+
+                return `
+                    <div id="ticket-${p.id}" class="ticket-enter bg-slate-900 rounded-2xl border ${borderHeader} shadow-xl flex flex-col overflow-hidden transition-all duration-300 hover:shadow-2xl hover:border-slate-600">
+                        <!-- Cabecera de Comanda -->
+                        <div class="${bgCabecera} px-4 py-3 border-b border-slate-800 flex justify-between items-start">
+                            <div>
+                                <div class="flex items-center gap-2">
+                                    <h2 class="text-xl font-black text-white tracking-tight">${ticketNumero}</h2>
+                                    ${badgeEstado}
+                                </div>
+                                <p class="text-xs font-semibold text-amber-300 mt-0.5">${mesaTexto}</p>
+                            </div>
+                            <div class="text-right">
+                                <div class="font-mono text-xs font-black tracking-tight text-slate-300 flex items-center gap-1 justify-end tiempo-ticket" data-creacion="${fechaCreacion}">
+                                    <i data-lucide="clock" class="w-3 h-3 text-slate-400"></i>
+                                    <span class="tiempo-texto">0m 0s</span>
+                                </div>
+                                <span class="text-[10px] text-slate-500 font-mono">${new Date(fechaCreacion).toLocaleTimeString('es-ES', {hour: '2-digit', minute:'2-digit'})}</span>
+                            </div>
+                        </div>
+
+                        <!-- Notas generales de la comanda -->
+                        ${p.notas ? `
+                            <div class="bg-amber-950/40 border-b border-amber-900/60 px-4 py-2 flex items-center gap-2 text-xs text-amber-200">
+                                <i data-lucide="alert-triangle" class="w-3.5 h-3.5 text-amber-400 shrink-0"></i>
+                                <span class="font-medium italic truncate">${p.notas}</span>
+                            </div>
+                        ` : ''}
+
+                        <!-- Lista de platos -->
+                        <div class="p-4 flex-1 custom-scroll max-h-72 overflow-y-auto space-y-1 bg-slate-950/30">
+                            ${itemsHtml || '<p class="text-center text-xs text-slate-500 py-4 italic">Sin platos asignados</p>'}
+                        </div>
+
+                        <!-- Pie y Botón de Estado -->
+                        <div class="p-3 bg-slate-900/90 border-t border-slate-800/80 mt-auto">
+                            ${botonAccion}
+                        </div>
+                    </div>
+                `;
+            },
+
+            cambiarEstadoPedido(pedidoId, nuevoEstado) {
+                // Actualización optimista local
+                const idx = this.pedidos.findIndex(p => p.id === pedidoId);
+                if (idx !== -1) {
+                    this.pedidos[idx].estado = nuevoEstado;
+                    if (nuevoEstado === 'listo' && this.pedidos[idx].items) {
+                        this.pedidos[idx].items.forEach(i => i.estado = 'listo');
+                    }
+                    if (nuevoEstado === 'servido') {
+                        // Al ser servido desaparece de la vista activa de cocina
+                        this.pedidos.splice(idx, 1);
+                    }
+                    this.renderizar();
+                }
+
+                if (this.socket && this.socket.connected) {
+                    this.socket.emit('actualizar_estado_pedido', {
+                        pedido_id: pedidoId,
+                        estado: nuevoEstado
+                    });
+                }
+            },
+
+            toggleEstadoItem(pedidoId, itemId, nuevoEstado) {
+                const pedido = this.pedidos.find(p => p.id === pedidoId);
+                if (pedido && pedido.items) {
+                    const item = pedido.items.find(i => i.id === itemId);
+                    if (item) {
+                        item.estado = nuevoEstado;
+                        this.renderizar();
+                    }
+                }
+
+                if (this.socket && this.socket.connected) {
+                    this.socket.emit('actualizar_estado_item', {
+                        pedido_id: pedidoId,
+                        item_pedido_id: itemId,
+                        estado: nuevoEstado
+                    });
+                }
+            },
+
+            actualizarTiemposUI() {
+                const elementos = document.querySelectorAll('.tiempo-ticket');
+                const ahora = new Date();
+
+                elementos.forEach(el => {
+                    const creacionStr = el.getAttribute('data-creacion');
+                    if (!creacionStr) return;
+                    const diffMs = ahora - new Date(creacionStr);
+                    const min = Math.floor(diffMs / 60000);
+                    const seg = Math.floor((diffMs % 60000) / 1000);
+
+                    const textoEl = el.querySelector('.tiempo-texto');
+                    if (textoEl) textoEl.textContent = `${min}m ${seg}s`;
+
+                    const ticketCard = el.closest('[id^="ticket-"]');
+                    if (ticketCard) {
+                        ticketCard.classList.remove('ring-2', 'ring-amber-500', 'ring-rose-500', 'animate-pulse-urgent');
+                        if (min >= 15) {
+                            ticketCard.classList.add('ring-2', 'ring-rose-500', 'animate-pulse-urgent');
+                        } else if (min >= 10) {
+                            ticketCard.classList.add('ring-2', 'ring-amber-500');
+                        }
+                    }
+                });
+            },
+
+            filtrarPor(estado) {
+                this.filtroActual = estado;
+                document.querySelectorAll('.filtro-btn').forEach(btn => {
+                    btn.className = "filtro-btn px-4 py-1.5 rounded-lg text-xs font-semibold transition-all bg-slate-800/80 hover:bg-slate-700 text-slate-300";
+                });
+
+                const btnActivo = document.getElementById(`btn-filtro-${estado}`);
+                if (btnActivo) {
+                    btnActivo.className = "filtro-btn px-4 py-1.5 rounded-lg text-xs font-semibold transition-all bg-amber-500 text-slate-950 shadow-md shadow-amber-500/20";
+                }
+
+                this.renderizar();
+            },
+
+            actualizarContadores() {
+                const pendientes = this.pedidos.filter(p => p.estado === 'pendiente').length;
+                const preparando = this.pedidos.filter(p => p.estado === 'preparando').length;
+                const listos = this.pedidos.filter(p => p.estado === 'listo').length;
+
+                document.getElementById('contador-pendientes').textContent = pendientes;
+                document.getElementById('contador-preparando').textContent = preparando;
+                document.getElementById('contador-listos').textContent = listos;
+
+                document.getElementById('count-filtro-todos').textContent = this.pedidos.length;
+                document.getElementById('count-filtro-pendiente').textContent = pendientes;
+                document.getElementById('count-filtro-preparando').textContent = preparando;
+                document.getElementById('count-filtro-listo').textContent = listos;
+            },
+
+            actualizarConexionUI(conectado) {
+                const dot = document.getElementById('conexion-indicador');
+                const txt = document.getElementById('conexion-texto');
+                if (conectado) {
+                    dot.className = 'w-2.5 h-2.5 rounded-full bg-emerald-400 shadow-[0_0_10px_rgba(52,211,153,0.8)]';
+                    txt.textContent = 'En vivo';
+                    txt.className = 'font-semibold text-emerald-400';
+                } else {
+                    dot.className = 'w-2.5 h-2.5 rounded-full bg-rose-500';
+                    txt.textContent = 'Reconectando...';
+                    txt.className = 'font-medium text-rose-400';
+                }
+            },
+
+            sonarAviso() {
+                if (!this.audioHabilitado) return;
+                try {
+                    const ctx = new (window.AudioContext || window.webkitAudioContext)();
+                    const osc = ctx.createOscillator();
+                    const gain = ctx.createGain();
+
+                    osc.type = 'triangle';
+                    // Tono doble tipo campana de restaurante
+                    osc.frequency.setValueAtTime(587.33, ctx.currentTime); // D5
+                    osc.frequency.setValueAtTime(880, ctx.currentTime + 0.12); // A5
+
+                    gain.gain.setValueAtTime(0.2, ctx.currentTime);
+                    gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.6);
+
+                    osc.connect(gain);
+                    gain.connect(ctx.destination);
+
+                    osc.start();
+                    osc.stop(ctx.currentTime + 0.6);
+                } catch(e) {}
+            },
+
+            toggleAudio() {
+                this.audioHabilitado = !this.audioHabilitado;
+                const icon = document.getElementById('icon-audio');
+                if (this.audioHabilitado) {
+                    icon.setAttribute('data-lucide', 'volume-2');
+                    icon.className = 'w-4 h-4 text-emerald-400';
+                } else {
+                    icon.setAttribute('data-lucide', 'volume-x');
+                    icon.className = 'w-4 h-4 text-slate-500';
+                }
+                lucide.createIcons();
+            }
+        };
+
+        document.addEventListener('DOMContentLoaded', () => KDS.init());
+    </script>
+</body>
+</html>
